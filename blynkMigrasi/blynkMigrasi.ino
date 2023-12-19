@@ -9,8 +9,8 @@
 #define BLYNK_AUTH_TOKEN "wrGRRtRw2rwrBtPfejHjs3fn_L9H2KZi"
 
 #ifndef STASSID
-#define STASSID "J_AGUNG BAKAR PERDANA"
-#define STAPSK "akugaktau"
+#define STASSID "Rumahmu"
+#define STAPSK "akugaktau123"
 #endif
 
 #define SS_PIN D10
@@ -40,6 +40,8 @@ unsigned long updateInterval = 1000;  // 1 detik
 #include "I2CKeyPad.h"
 
 WidgetLCD blynkLCD(V4);
+WidgetTable table(V10);
+
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -50,13 +52,39 @@ const uint8_t KEYPAD_ADDRESS = 0x20;
 I2CKeyPad keyPad(KEYPAD_ADDRESS);
 char keymap[19] = "123A456B789C*0#DNF";
 
-char* correctPin = "1234";
+//  char* correctPin = "1234";
+char correctPin[10];
 
+char* darurat = "1234";
 
 const char* ssid = STASSID;
 const char* password = STAPSK;
 
+int colomn = 1;
+
 X509List cert(cert_DigiCert_Global_Root_CA);
+
+// BLYNK_WRITE(V3) {
+//      char* integerValue = param.asStr();  // Get value as a character
+
+//     // Assuming correctPin is a char pointer
+//     correctPin = integerValue;
+
+//     Serial.println(correctPin);
+// }
+BLYNK_WRITE(V3) {
+  const char* integerValue = param.asStr();  // Get value as a character
+
+  // Copy the const char* to a non-const buffer
+  strncpy(correctPin, integerValue, sizeof(correctPin));
+
+  // Now correctPinBuffer contains the character representation of the value from Blynk
+  // Make sure to null-terminate the string if necessary
+  correctPin[sizeof(correctPin) - 1] = '\0';
+}
+
+
+
 
 void connectWiFi() {
   setupLcd();
@@ -68,6 +96,7 @@ void connectWiFi() {
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     lcd.print("Menghubungkan");
+    blynkLCD.print(0, 0, "Menghubungkan");
     delay(500);
     lcd.clear();
 
@@ -76,9 +105,11 @@ void connectWiFi() {
       Serial.println("\nBeralih ke offline mode.");
       lcd.clear();
       lcd.print("Offline Mode");
+      blynkLCD.print(0, 0, "Offline Mode");
       lcd.clear();
       lcd.print("Masukkan PIN:");
-      usingPin();
+      blynkLCD.print(0, 0, "Masukan PIN");
+      emergencyPin();
       wifiConnected = false;
       return;
     }
@@ -194,6 +225,63 @@ void usingPin() {
 
   lcd.clear();
   lcd.print("Masukkan PIN:");
+  blynkLCD.clear();
+  blynkLCD.print(0, 0, "Masukan PIN");
+
+  while (true) {
+    if (keyPad.isPressed()) {
+      char Input = keyPad.getChar();
+      tone(buzzer, HIGH);
+      delay(100);
+      tone(buzzer, LOW);
+      if (Input == 'D') {
+        lcd.clear();
+        blynkLCD.clear();
+        lcd.print("Masukkan PIN:");
+        blynkLCD.print(0, 0, "Masukan PIN");
+        pinIndex = 0;
+        memset(enteredPin, 0, sizeof(enteredPin));
+      } else if (Input == '#') {
+        enteredPin[pinIndex] = '\0';
+        if (verifyPin(enteredPin, correctPin)) {
+          lcd.clear();
+          blynkLCD.clear();
+          lcd.print("PIN Benar");
+          blynkLCD.print(0, 0, "PIN Benar");
+          pintuBuka();
+        } else {
+          lcd.clear();
+          blynkLCD.clear();
+          lcd.print("PIN Salah");
+          blynkLCD.print(0, 0, "PIN Salah");
+          delay(2000);
+          lcd.clear();
+          blynkLCD.clear();
+          lcd.print("Masukkan PIN:");
+          blynkLCD.print(0, 0, "Masukan PIN");
+        }
+        break;
+      } else {
+        if (pinIndex < 4) {
+          enteredPin[pinIndex] = Input;
+          lcd.setCursor(pinIndex, 1);
+          lcd.print('*');
+          blynkLCD.print(pinIndex, 1, "*");
+          pinIndex++;
+        }
+      }
+    }
+    delay(200);
+  }
+}
+
+//login dnegan pin
+void emergencyPin() {
+  char enteredPin[5];
+  int pinIndex = 0;
+
+  lcd.clear();
+  lcd.print("Masukkan PIN:");
 
   while (true) {
     if (keyPad.isPressed()) {
@@ -208,10 +296,26 @@ void usingPin() {
         memset(enteredPin, 0, sizeof(enteredPin));
       } else if (Input == '#') {
         enteredPin[pinIndex] = '\0';
-        if (verifyPin(enteredPin, correctPin)) {
+        if (verifyPin(enteredPin, darurat)) {
           lcd.clear();
           lcd.print("PIN Benar");
-          pintuBuka();
+          lcd.clear();
+
+          int i;
+          digitalWrite(relay, HIGH);
+          tone(buzzer, HIGH);
+          // tone(buzzer, 3000);
+          delay(500);
+          noTone(buzzer);
+          lcd.clear();
+          lcd.print("Pintu Terbuka");
+          lcd.setCursor(0, 1);
+          for (i = 0; i < 12; i++) {
+            lcd.print(".");
+            blynkLCD.print(i, 1, ".");
+            delay(800);
+          }
+          digitalWrite(relay, LOW);
         } else {
           lcd.clear();
           lcd.print("PIN Salah");
@@ -219,7 +323,7 @@ void usingPin() {
           lcd.clear();
           lcd.print("Masukkan PIN:");
         }
-        break;
+        connectWiFi();
       } else {
         if (pinIndex < 4) {
           enteredPin[pinIndex] = Input;
@@ -233,17 +337,22 @@ void usingPin() {
   }
 }
 
+
 void setup() {
   Serial.begin(19200);
   setupKeyPad();
+  setupPinMode();
   connectWiFi();
   Blynk.begin(BLYNK_AUTH_TOKEN, STASSID, STAPSK, "iot.amikom.ac.id", 8080);
   SPI.begin();
   mfrc522.PCD_Init();
   Serial.println();
   synchronizeTime();
-  setupPinMode();
   lcd.print("Tempelkan Kartu");
+  blynkLCD.print(0, 0, "Tempelkan Kartu");
+  Blynk.run();
+  Blynk.syncAll();
+  Blynk.virtualWrite(V10, "clr");
 }
 
 void pintuBuka() {
@@ -254,13 +363,15 @@ void pintuBuka() {
   // tone(buzzer, 3000);
   delay(500);
   noTone(buzzer);
+  lcd.clear();
+  blynkLCD.clear();
   lcd.print("Pintu Terbuka");
   //Blynk.virtualWrite(V4, "Pintu Terbuka");
-  blynkLCD.print(0,0, "Pintu Terbuka");
+  blynkLCD.print(0, 0, "Pintu Terbuka");
   lcd.setCursor(0, 1);
   for (i = 0; i < 12; i++) {
     lcd.print(".");
-    blynkLCD.print(i,1, ".");
+    blynkLCD.print(i, 1, ".");
     delay(800);
   }
   digitalWrite(relay, LOW);
@@ -277,7 +388,7 @@ void getCard() {
       Serial.print("UID dari API : ");
       Serial.println(dataUID_API);
 
-      const size_t capacity = JSON_ARRAY_SIZE(4) + 4 * JSON_OBJECT_SIZE(4) + 90;
+      const size_t capacity = JSON_ARRAY_SIZE(6) + 6 * JSON_OBJECT_SIZE(6) + 90;
       DynamicJsonDocument doc(capacity);
       DeserializationError error = deserializeJson(doc, dataUID_API);
 
@@ -309,9 +420,12 @@ void getCard() {
             Blynk.virtualWrite(V1, name);
             Blynk.virtualWrite(V5, year() + month());
             Blynk.logEvent("detect_orang_masuk", String("Orang Yang Masuk: ") + name);
+            //Blynk.virtualWrite(V10, "add", name, "Masuk");
+            table.addRow(colomn, name, "Masuk");
             // lcd.print(name);
             pintuBuka();
             lcd.clear();
+            colomn++;
             return;
           } else {
             lcd.clear();
@@ -329,12 +443,11 @@ void getCard() {
 
 
 void loop() {
-  Blynk.run();
+
   lcd.clear();
   blynkLCD.clear();
   lcd.print("Tempelkan kartu");
-  blynkLCD.print(0,0, "Tempelkan Kartu");
-
+  blynkLCD.print(0, 0, "Tempelkan Kartu");
   getCard();
 
   if (keyPad.isPressed()) {
@@ -344,7 +457,7 @@ void loop() {
     }
   }
 
-  if(digitalRead(D8) == 1){
+  if (digitalRead(D8) == 1) {
     pintuBuka();
   }
 
